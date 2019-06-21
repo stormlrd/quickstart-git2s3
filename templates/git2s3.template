@@ -1076,18 +1076,11 @@
             "Type": "AWS::EC2::SecurityGroupIngress",
             "Condition": "MakePrivateSolution",
             "Properties": {
-                "GroupName": {
-                    "Ref": "PrivateAPIEndpointSecurityGroup"
-                },
+                "GroupId": { "Ref": "PrivateAPIEndpointSecurityGroup" },
                 "IpProtocol": "tcp",
                 "FromPort": 443,
                 "ToPort": 443,
-                "SourceSecurityGroupId": {
-                    "Fn::GetAtt": [
-                        "PrivateLambdaSecurityGroup",
-                        "GroupId"
-                    ]
-                }
+                "SourceSecurityGroupId": { "Ref": "PrivateLambdaSecurityGroup" }
             }
         },
         "ZipDlRole": {
@@ -2166,6 +2159,84 @@
                 ]
             }
         },
+       "PrivGitPullPublicWebHookApi": {
+            "Condition": "MakePrivateSolution",
+            "Value": {
+                "Fn::Join": [
+                    "",
+                    [
+                        " https://",
+                        {
+                            "Fn::If": [
+                                "UseCustomDomain",
+                                {
+                                    "Ref": "CustomDomainName"
+                                },
+                                {
+                                    "Fn::Join": [
+                                        "",
+                                        [
+                                            {
+                                                "Ref": "PrivateWebHookApi"
+                                            },
+                                            ".execute-api.",
+                                            {
+                                                "Ref": "AWS::Region"
+                                            },
+                                            ".amazonaws.com"
+                                        ]
+                                    ]
+                                }
+                            ]
+                        },
+                        "/",
+                        {
+                            "Ref": "PrivateWebHookApiProdStage"
+                        },
+                        "/gitpull"
+                    ]
+                ]
+            }
+        },
+        "PrivZipDownloadPublicWebHookApi": {
+            "Condition": "MakePrivateSolution",
+            "Value": {
+                "Fn::Join": [
+                    "",
+                    [
+                        " https://",
+                        {
+                            "Fn::If": [
+                                "UseCustomDomain",
+                                {
+                                    "Ref": "CustomDomainName"
+                                },
+                                {
+                                    "Fn::Join": [
+                                        "",
+                                        [
+                                            {
+                                                "Ref": "PrivateWebHookApi"
+                                            },
+                                            ".execute-api.",
+                                            {
+                                                "Ref": "AWS::Region"
+                                            },
+                                            ".amazonaws.com"
+                                        ]
+                                    ]
+                                }
+                            ]
+                        },
+                        "/",
+                        {
+                            "Ref": "PrivateWebHookApiProdStage"
+                        },
+                        "/zipdl"
+                    ]
+                ]
+            }
+        },        
         "OutputBucketName": {
             "Value": {
                 "Ref": "OutputBucket"
