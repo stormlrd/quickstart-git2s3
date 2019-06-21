@@ -34,6 +34,17 @@
                 },
                 {
                     "Label": {
+                        "default": "Private Server Settings"
+                    },
+                    "Parameters": [
+                        "PrivateServerIP",
+                        "PrivateLambdaVPCID",
+                        "PrivateLambdaSubnetID",
+                        "PrivateCreateEndpoint"
+                    ]
+                },                
+                {
+                    "Label": {
                         "default": "AWS Quick Start Configuration"
                     },
                     "Parameters": [
@@ -64,6 +75,18 @@
                 "OutputBucketName": {
                     "default": "Output S3 Bucket Name"
                 },
+                "PrivateServerIP": {
+                    "default": "Private Repo Server IP Address"
+                },
+                "PrivateLambdaVPCID": {
+                    "default": "Private Solution VPC ID"
+                },
+                "PrivateLambdaSubnetID": {
+                    "default": "Private Solution Subnet IDs"
+                },
+                "PrivateCreateEndpoint": {
+                    "default": "Create VPC Endpoint?"
+                },
                 "QSS3BucketName": {
                     "default": "Quick Start S3 Bucket Name"
                 },
@@ -86,7 +109,7 @@
             "NoEcho": "true"
         },
         "CustomDomainName": {
-            "Description": "Use a custom domain name for the webhook endpoint, if left blank API Gateway will create a domain name for you",
+            "Description": "Use a custom domain name for the webhook endpoint, if left blank API Gateway will create a domain name for you (Ignored if using Private Server as Private APIs do not support Custom Names)",
             "Type": "String",
             "Default": ""
         },
@@ -115,6 +138,27 @@
             "Type": "String",
             "Default": ""
         },
+        "PrivateServerIP": {
+            "Description": "OPTIONAL: Existing Private Server IP address (!!Entering an IP will force the solution to become private!! API = private, Lambda = VPC Bound, PrivateLink Created)",
+            "Type": "String",
+            "Default": ""
+        },
+        "PrivateLambdaVPCID": {
+            "Description": "OPTIONAL: Private Lambda VPC ID (Required when creating solution as a private one)",
+            "Type": "AWS::EC2::VPC::Id",
+            "Default": ""
+        },
+        "PrivateLambdaSubnetID": {  
+            "Description": "OPTIONAL: Subnet to put API Gateway and Lambda Function (Required when creating solution as a private one)",
+            "Type": "AWS::EC2::Subnet::Id",
+            "Default": ""
+        },
+        "PrivateCreateEndpoint": {  
+            "Description": "OPTIONAL: Create a VPC Privatelink Interface Endpoint for API execution (true / false (if you already have one set to false))",
+            "Type": "String",
+            "Default": "true",
+            "AllowedValues": ["true","false"]
+        },
         "QSS3BucketName": {
             "AllowedPattern": "^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$",
             "ConstraintDescription": "Quick Start bucket name can include numbers, lowercase letters, uppercase letters, and hyphens (-). It cannot start or end with a hyphen (-).",
@@ -131,6 +175,46 @@
         }
     },
     "Conditions": {
+        "CreatePrivateVPCEndpoint": {
+            "Fn::And": [          
+                { "Fn::Not": [
+                    {
+                        "Fn::Equals": [
+                            {
+                                "Ref": "PrivateServerIP"
+                            },
+                            ""
+                        ]
+                    }
+                ]},
+                {"Fn::Equals": [
+                    {
+                        "Ref": "PrivateCreateEndpoint"
+                    },
+                    "true"
+                ]}
+            ]
+        },
+        "MakePrivateSolution": {
+            "Fn::Not": [
+                {
+                    "Fn::Equals": [
+                        {
+                            "Ref": "PrivateServerIP"
+                        },
+                        ""
+                    ]
+                }
+            ]
+        },
+        "MakePublicSolution": {
+            "Fn::Equals": [
+                {
+                    "Ref": "PrivateServerIP"
+                },
+                ""
+            ]
+        },        
         "UseAllowedIps": {
             "Fn::Not": [
                 {
@@ -812,6 +896,15 @@
                                 {
                                     "Effect": "Allow",
                                     "Action": [
+                                        "ec2:CreateNetworkInterface",
+                                        "ec2:DescribeNetworkInterfaces",
+                                        "ec2:DeleteNetworkInterface"
+                                    ],
+                                    "Resource": "*"
+                                },                                
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
                                         "kms:Decrypt"
                                     ],
                                     "Resource": [
@@ -891,9 +984,10 @@
                 ]
             }
         },
-        "GitPullLambda": {
+        "PublicGitPullLambda": {
             "DependsOn": "CopyZips",
             "Type": "AWS::Lambda::Function",
+            "Condition": "MakePublicSolution",
             "Properties": {
                 "Handler": "lambda_function.lambda_handler",
                 "MemorySize": "128",
@@ -912,6 +1006,87 @@
                     "S3Key": {
                         "Fn::Sub": "${QSS3KeyPrefix}functions/packages/GitPullS3/lambda.zip"
                     }
+                }
+            }
+        },
+        "PrivateGitPullLambda": {
+            "DependsOn": "CopyZips",
+            "Type": "AWS::Lambda::Function",
+            "Condition": "MakePrivateSolution",
+            "Properties": {
+                "Handler": "lambda_function.lambda_handler",
+                "MemorySize": "128",
+                "Role": {
+                    "Fn::GetAtt": [
+                        "GitPullRole",
+                        "Arn"
+                    ]
+                },
+                "Runtime": "python2.7",
+                "Timeout": "300",
+                "Code": {
+                    "S3Bucket": {
+                        "Ref": "LambdaZipsBucket"
+                    },
+                    "S3Key": {
+                        "Fn::Sub": "${QSS3KeyPrefix}functions/packages/GitPullS3/lambda.zip"
+                    }
+                },
+                "VpcConfig" : {
+                    "SecurityGroupIds" : [ {"Ref": "PrivateLambdaSecurityGroup"}],
+                    "SubnetIds" : [ {"Ref": "PrivateLambdaSubnetID"}]
+                }
+            }
+        },   
+        "PrivateLambdaSecurityGroup": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Condition": "MakePrivateSolution",
+            "Properties": {
+                "GroupDescription" : "Private Lambda Security Group",
+                "GroupName" : "sgPrivateGitPullLambda",
+                "SecurityGroupEgress" : [ 
+                    {
+                        "CidrIp" : {"Ref": "PrivateServerIP"},
+                        "Description" : "Outbound 22 to Code Repository Server",
+                        "FromPort" : "22",
+                        "IpProtocol" : "tcp",
+                        "ToPort" : "22"
+                    },
+                    {
+                        "CidrIp" : {"Ref": "PrivateServerIP"},
+                        "Description" : "Outbound 443 to Code Repository Server",
+                        "FromPort" : "443",
+                        "IpProtocol" : "tcp",
+                        "ToPort" : "443"
+                    }
+                ],
+                "VpcId" : {"Ref": "PrivateLambdaVPCID"}
+            }
+        },
+        "PrivateAPIEndpointSecurityGroup": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Condition": "CreatePrivateVPCEndpoint",
+            "Properties": {
+                "GroupDescription" : "Private VPC Endpoint Security Group",
+                "GroupName" : "sgPrivateVPCAPIEndpoint",
+                "VpcId" : {"Ref": "PrivateLambdaVPCID"}
+            }
+        },
+        "PrivateLambdaSecurityGroupIngressRule": {
+            "Type": "AWS::EC2::SecurityGroupIngress",
+            "Condition": "MakePrivateSolution",
+            "Properties": {
+                "GroupName": {
+                    "Ref": "PrivateAPIEndpointSecurityGroup"
+                },
+                "IpProtocol": "tcp",
+                "FromPort": 443,
+                "ToPort": 443,
+                "SourceSecurityGroupId": {
+                    "Fn::GetAtt": [
+                        "PrivateLambdaSecurityGroup",
+                        "GroupId"
+                    ]
                 }
             }
         },
@@ -1011,8 +1186,9 @@
                 "Timeout": 30
             }
         },
-        "WebHookRole": {
+        "PublicWebHookRole": {
             "Type": "AWS::IAM::Role",
+            "Condition": "MakePublicSolution",
             "Properties": {
                 "AssumeRolePolicyDocument": {
                     "Version": "2012-10-17",
@@ -1045,7 +1221,7 @@
                                     "Resource": [
                                         {
                                             "Fn::GetAtt": [
-                                                "GitPullLambda",
+                                                "PublicGitPullLambda",
                                                 "Arn"
                                             ]
                                         },
@@ -1063,8 +1239,62 @@
                 ]
             }
         },
-        "WebHookApi": {
+        "PrivateWebHookRole": {
+            "Type": "AWS::IAM::Role",
+            "Condition": "MakePrivateSolution",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": "apigateway.amazonaws.com"
+                            },
+                            "Action": "sts:AssumeRole"
+                        }
+                    ]
+                },
+                "Path": "/",
+                "ManagedPolicyArns": [
+                    "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
+                ],
+                "Policies": [
+                    {
+                        "PolicyName": "git2cp-webhook",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "lambda:InvokeAsync",
+                                        "lambda:InvokeFunction"
+                                    ],
+                                    "Resource": [
+                                        {
+                                            "Fn::GetAtt": [
+                                                "PrivateGitPullLambda",
+                                                "Arn"
+                                            ]
+                                        },
+                                        {
+                                            "Fn::GetAtt": [
+                                                "ZipDlLambda",
+                                                "Arn"
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        },        
+        "PublicWebHookApi": {
             "Type": "AWS::ApiGateway::RestApi",
+            "Condition": "MakePublicSolution",
             "Properties": {
                 "Body": {
                     "swagger": "2.0",
@@ -1106,7 +1336,7 @@
                                     "type": "aws",
                                     "credentials": {
                                         "Fn::GetAtt": [
-                                            "WebHookRole",
+                                            "PublicWebHookRole",
                                             "Arn"
                                         ]
                                     },
@@ -1131,7 +1361,7 @@
                                                 ":lambda:path//2015-03-31/functions/",
                                                 {
                                                     "Fn::GetAtt": [
-                                                        "GitPullLambda",
+                                                        "PublicGitPullLambda",
                                                         "Arn"
                                                     ]
                                                 },
@@ -1227,7 +1457,7 @@
                                     "type": "aws",
                                     "credentials": {
                                         "Fn::GetAtt": [
-                                            "WebHookRole",
+                                            "PublicWebHookRole",
                                             "Arn"
                                         ]
                                     },
@@ -1335,23 +1565,410 @@
                 }
             }
         },
-        "WebHookApiDeployment": {
+        "PublicWebHookApiDeployment": {
             "Type": "AWS::ApiGateway::Deployment",
+            "Condition": "MakePublicSolution",
             "Properties": {
                 "RestApiId": {
-                    "Ref": "WebHookApi"
+                    "Ref": "PublicWebHookApi"
                 },
                 "StageName": "DummyStage"
             }
         },
-        "WebHookApiProdStage": {
+        "PublicWebHookApiProdStage": {
             "Type": "AWS::ApiGateway::Stage",
+            "Condition": "MakePublicSolution",
             "Properties": {
                 "DeploymentId": {
-                    "Ref": "WebHookApiDeployment"
+                    "Ref": "PublicWebHookApiDeployment"
                 },
                 "RestApiId": {
-                    "Ref": "WebHookApi"
+                    "Ref": "PublicWebHookApi"
+                },
+                "StageName": "Prod",
+                "Variables": {
+                    "outputbucket": {
+                        "Ref": "OutputBucket"
+                    },
+                    "allowedips": {
+                        "Fn::If": [
+                            "UseAllowedIps",
+                            {
+                                "Ref": "AllowedIps"
+                            },
+                            {
+                                "Ref": "AWS::NoValue"
+                            }
+                        ]
+                    },
+                    "apisecrets": {
+                        "Fn::If": [
+                            "UseApiSecret",
+                            {
+                                "Ref": "ApiSecret"
+                            },
+                            {
+                                "Ref": "AWS::NoValue"
+                            }
+                        ]
+                    },
+                    "gittoken": {
+                        "Fn::If": [
+                            "UseGitToken",
+                            {
+                                "Ref": "GitToken"
+                            },
+                            {
+                                "Ref": "AWS::NoValue"
+                            }
+                        ]
+                    },
+                    "oauthkey": {
+                        "Fn::If": [
+                            "UseOauthKey",
+                            {
+                                "Ref": "OauthKey"
+                            },
+                            {
+                                "Ref": "AWS::NoValue"
+                            }
+                        ]
+                    },
+                    "oauthsecret": {
+                        "Fn::If": [
+                            "UseOauthSecret",
+                            {
+                                "Ref": "OauthSecret"
+                            },
+                            {
+                                "Ref": "AWS::NoValue"
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        "PrivateAPIVPCPrivateLinkEndPoint": {
+            "Type" : "AWS::EC2::VPCEndpoint",
+            "Properties" : {
+                "SecurityGroupIds" : [ {"Ref": "PrivateAPIEndpointSecurityGroup"} ],
+                "ServiceName" : { "Fn::Sub": "com.amazonaws.${AWS::Region}.execute-api" },
+                "SubnetIds" : [ {"Ref": "PrivateLambdaSubnetID"} ],
+                "VpcEndpointType" : "Interface",
+                "VpcId" : {"Ref": "PrivateLambdaVPCID"}
+            }
+        },      
+        "PrivateWebHookApi": {
+            "Type": "AWS::ApiGateway::RestApi",
+            "Condition": "MakePrivateSolution",
+            "Properties": {
+                "Body": {
+                    "swagger": "2.0",
+                    "info": {
+                        "version": "2016-07-26T07:34:38Z",
+                        "title": {
+                            "Fn::Join": [
+                                "",
+                                [
+                                    "G2CP-",
+                                    {
+                                        "Ref": "AWS::StackName"
+                                    }
+                                ]
+                            ]
+                        }
+                    },
+                    "schemes": [
+                        "https"
+                    ],
+                    "paths": {
+                        "/gitpull": {
+                            "post": {
+                                "consumes": [
+                                    "application/json"
+                                ],
+                                "produces": [
+                                    "application/json"
+                                ],
+                                "responses": {
+                                    "200": {
+                                        "description": "200 response",
+                                        "schema": {
+                                            "$ref": "#/definitions/Empty"
+                                        }
+                                    }
+                                },
+                                "x-amazon-apigateway-integration": {
+                                    "type": "aws",
+                                    "credentials": {
+                                        "Fn::GetAtt": [
+                                            "PrivateWebHookRole",
+                                            "Arn"
+                                        ]
+                                    },
+                                    "responses": {
+                                        "default": {
+                                            "statusCode": "200"
+                                        }
+                                    },
+                                    "requestParameters": {
+                                        "integration.request.header.X-Amz-Invocation-Type": "'Event'"
+                                    },
+                                    "passthroughBehavior": "when_no_templates",
+                                    "httpMethod": "POST",
+                                    "uri": {
+                                        "Fn::Join": [
+                                            "",
+                                            [
+                                                "arn:aws:apigateway:",
+                                                {
+                                                    "Ref": "AWS::Region"
+                                                },
+                                                ":lambda:path//2015-03-31/functions/",
+                                                {
+                                                    "Fn::GetAtt": [
+                                                        "PrivateGitPullLambda",
+                                                        "Arn"
+                                                    ]
+                                                },
+                                                "/invocations"
+                                            ]
+                                        ]
+                                    },
+                                    "requestTemplates": {
+                                        "application/json": {
+                                            "Fn::Join": [
+                                                "",
+                                                [
+                                                    "#set($allParams = $input.params())\n",
+                                                    "{\n",
+                                                    "\"body-json\" : $input.json('$'),\n",
+                                                    "\"params\" : {\n",
+                                                    "#foreach($type in $allParams.keySet())\n",
+                                                    "    #set($params = $allParams.get($type))\n",
+                                                    "\"$type\" : {\n",
+                                                    "    #foreach($paramName in $params.keySet())\n",
+                                                    "    \"$paramName\" : \"$util.escapeJavaScript($params.get($paramName))\"\n",
+                                                    "        #if($foreach.hasNext),#end\n",
+                                                    "    #end\n",
+                                                    "}\n",
+                                                    "    #if($foreach.hasNext),#end\n",
+                                                    "#end\n",
+                                                    "},\n",
+                                                    "\"stage-variables\" : {\n",
+                                                    "#foreach($key in $stageVariables.keySet())\n",
+                                                    "\"$key\" : \"$util.escapeJavaScript($stageVariables.get($key))\"\n",
+                                                    "    #if($foreach.hasNext),#end\n",
+                                                    "#end\n",
+                                                    "},\n",
+                                                    "\"context\" : {\n",
+                                                    "    \"account-id\" : \"$context.identity.accountId\",\n",
+                                                    "    \"api-id\" : \"$context.apiId\",\n",
+                                                    "    \"api-key\" : \"$context.identity.apiKey\",\n",
+                                                    "    \"authorizer-principal-id\" : \"$context.authorizer.principalId\",\n",
+                                                    "    \"caller\" : \"$context.identity.caller\",\n",
+                                                    "    \"cognito-authentication-provider\" : \"$context.identity.cognitoAuthenticationProvider\",\n",
+                                                    "    \"cognito-authentication-type\" : \"$context.identity.cognitoAuthenticationType\",\n",
+                                                    "    \"cognito-identity-id\" : \"$context.identity.cognitoIdentityId\",\n",
+                                                    "    \"cognito-identity-pool-id\" : \"$context.identity.cognitoIdentityPoolId\",\n",
+                                                    "    \"http-method\" : \"$context.httpMethod\",\n",
+                                                    "    \"stage\" : \"$context.stage\",\n",
+                                                    "    \"source-ip\" : \"$context.identity.sourceIp\",\n",
+                                                    "    \"user\" : \"$context.identity.user\",\n",
+                                                    "    \"user-agent\" : \"$context.identity.userAgent\",\n",
+                                                    "    \"user-arn\" : \"$context.identity.userArn\",\n",
+                                                    "    \"request-id\" : \"$context.requestId\",\n",
+                                                    "    \"resource-id\" : \"$context.resourceId\",\n",
+                                                    "    \"resource-path\" : \"$context.resourcePath\",\n",
+                                                    "    \"allowed-ips\" : \"$stageVariables.allowedips\",\n",
+                                                    "    \"api-secrets\" : \"$stageVariables.apisecrets\",\n",
+                                                    "    \"key-bucket\" : \"",
+                                                    {
+                                                        "Ref": "KeyBucket"
+                                                    },
+                                                    "\",\n",
+                                                    "    \"output-bucket\" : \"$stageVariables.outputbucket\",\n",
+                                                    "    \"Private-key\" : \"",
+                                                    {
+                                                        "Ref": "CreateSSHKey"
+                                                    },
+                                                    "\",\n",
+                                                    "    \"raw-body\" : \"$util.escapeJavaScript($input.body).replace(\"\\'\",\"'\")\"\n",
+                                                    "    }\n",
+                                                    "}"
+                                                ]
+                                            ]
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "/zipdl": {
+                            "post": {
+                                "consumes": [
+                                    "application/json"
+                                ],
+                                "produces": [
+                                    "application/json"
+                                ],
+                                "responses": {
+                                    "200": {
+                                        "description": "200 response",
+                                        "schema": {
+                                            "$ref": "#/definitions/Empty"
+                                        }
+                                    }
+                                },
+                                "x-amazon-apigateway-integration": {
+                                    "type": "aws",
+                                    "credentials": {
+                                        "Fn::GetAtt": [
+                                            "PrivateWebHookRole",
+                                            "Arn"
+                                        ]
+                                    },
+                                    "responses": {
+                                        "default": {
+                                            "statusCode": "200"
+                                        }
+                                    },
+                                    "requestParameters": {
+                                        "integration.request.header.X-Amz-Invocation-Type": "'Event'"
+                                    },
+                                    "passthroughBehavior": "when_no_templates",
+                                    "httpMethod": "POST",
+                                    "uri": {
+                                        "Fn::Join": [
+                                            "",
+                                            [
+                                                "arn:aws:apigateway:",
+                                                {
+                                                    "Ref": "AWS::Region"
+                                                },
+                                                ":lambda:path//2015-03-31/functions/",
+                                                {
+                                                    "Fn::GetAtt": [
+                                                        "ZipDlLambda",
+                                                        "Arn"
+                                                    ]
+                                                },
+                                                "/invocations"
+                                            ]
+                                        ]
+                                    },
+                                    "requestTemplates": {
+                                        "application/json": {
+                                            "Fn::Join": [
+                                                "",
+                                                [
+                                                    "#set($allParams = $input.params())\n",
+                                                    "{\n",
+                                                    "\"body-json\" : $input.json('$'),\n",
+                                                    "\"params\" : {\n",
+                                                    "#foreach($type in $allParams.keySet())\n",
+                                                    "    #set($params = $allParams.get($type))\n",
+                                                    "\"$type\" : {\n",
+                                                    "    #foreach($paramName in $params.keySet())\n",
+                                                    "    \"$paramName\" : \"$util.escapeJavaScript($params.get($paramName))\"\n",
+                                                    "        #if($foreach.hasNext),#end\n",
+                                                    "    #end\n",
+                                                    "}\n",
+                                                    "    #if($foreach.hasNext),#end\n",
+                                                    "#end\n",
+                                                    "},\n",
+                                                    "\"stage-variables\" : {\n",
+                                                    "#foreach($key in $stageVariables.keySet())\n",
+                                                    "\"$key\" : \"$util.escapeJavaScript($stageVariables.get($key))\"\n",
+                                                    "    #if($foreach.hasNext),#end\n",
+                                                    "#end\n",
+                                                    "},\n",
+                                                    "\"context\" : {\n",
+                                                    "    \"account-id\" : \"$context.identity.accountId\",\n",
+                                                    "    \"api-id\" : \"$context.apiId\",\n",
+                                                    "    \"api-key\" : \"$context.identity.apiKey\",\n",
+                                                    "    \"authorizer-principal-id\" : \"$context.authorizer.principalId\",\n",
+                                                    "    \"caller\" : \"$context.identity.caller\",\n",
+                                                    "    \"cognito-authentication-provider\" : \"$context.identity.cognitoAuthenticationProvider\",\n",
+                                                    "    \"cognito-authentication-type\" : \"$context.identity.cognitoAuthenticationType\",\n",
+                                                    "    \"cognito-identity-id\" : \"$context.identity.cognitoIdentityId\",\n",
+                                                    "    \"cognito-identity-pool-id\" : \"$context.identity.cognitoIdentityPoolId\",\n",
+                                                    "    \"http-method\" : \"$context.httpMethod\",\n",
+                                                    "    \"stage\" : \"$context.stage\",\n",
+                                                    "    \"source-ip\" : \"$context.identity.sourceIp\",\n",
+                                                    "    \"user\" : \"$context.identity.user\",\n",
+                                                    "    \"user-agent\" : \"$context.identity.userAgent\",\n",
+                                                    "    \"user-arn\" : \"$context.identity.userArn\",\n",
+                                                    "    \"request-id\" : \"$context.requestId\",\n",
+                                                    "    \"resource-id\" : \"$context.resourceId\",\n",
+                                                    "    \"resource-path\" : \"$context.resourcePath\",\n",
+                                                    "    \"oauth-key\" : \"$stageVariables.oauthkey\",\n",
+                                                    "    \"oauth-secret\" : \"$stageVariables.oauthsecret\",\n",
+                                                    "    \"output-bucket\" : \"$stageVariables.outputbucket\",\n",
+                                                    "    \"git-token\" : \"$stageVariables.gittoken\"\n",
+                                                    "    }\n",
+                                                    "}"
+                                                ]
+                                            ]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "securityDefinitions": {
+                        "sigv4": {
+                            "type": "apiKey",
+                            "name": "Authorization",
+                            "in": "header",
+                            "x-amazon-apigateway-authtype": "awsSigv4"
+                        }
+                    },
+                    "definitions": {
+                        "Empty": {
+                            "type": "object"
+                        }
+                    }
+                },
+                "Parameters": {
+                    "endpointConfigurationTypes": "PRIVATE"
+                },
+                "Policy": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": "*",
+                            "Action": "execute-api.Invoke",
+                            "Resource": { "Fn::Sub": "arn:aws:execute-api:/*/*/*" },
+                            "Condition": {
+                                "StringEquals": {
+                                    "aws:sourceVpce": {"Ref":"PrivateAPIVPCPrivateLinkEndPoint"}
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        "PrivateWebHookApiDeployment": {
+            "Type": "AWS::ApiGateway::Deployment",
+            "Condition": "MakePrivateSolution",
+            "Properties": {
+                "RestApiId": {
+                    "Ref": "PrivateWebHookApi"
+                },
+                "StageName": "DummyStage"
+            }
+        },
+        "PrivateWebHookApiProdStage": {
+            "Type": "AWS::ApiGateway::Stage",
+            "Condition": "MakePrivateSolution",
+            "Properties": {
+                "DeploymentId": {
+                    "Ref": "PrivateWebHookApiDeployment"
+                },
+                "RestApiId": {
+                    "Ref": "PrivateWebHookApi"
                 },
                 "StageName": "Prod",
                 "Variables": {
@@ -1425,7 +2042,7 @@
                 }
             }
         },
-        "WebHookApiCustomDomainName": {
+        "PublicWebHookApiCustomDomainName": {
             "Condition": "UseCustomDomain",
             "Type": "AWS::ApiGateway::DomainName",
             "Properties": {
@@ -1437,18 +2054,19 @@
                 }
             }
         },
-        "WebHookApiCustomDomainNameMapping": {
+        "PublicWebHookApiCustomDomainNameMapping": {
             "Condition": "UseCustomDomain",
+            "Condition": "MakePublicSolution",
             "Type": "AWS::ApiGateway::BasePathMapping",
             "Properties": {
                 "DomainName": {
                     "Ref": "CustomDomainName"
                 },
                 "RestApiId": {
-                    "Ref": "WebHookApi"
+                    "Ref": "PublicWebHookApi"
                 }
             }
-        }
+        }     
     },
     "Outputs": {
         "CustomDomainNameCNAME": {
@@ -1457,7 +2075,7 @@
                     "UseCustomDomain",
                     {
                         "Fn::GetAtt": [
-                            "WebHookApiCustomDomainName",
+                            "PublicWebHookApiCustomDomainName",
                             "DistributionDomainName"
                         ]
                     },
@@ -1470,7 +2088,8 @@
                 "Ref": "CreateSSHKey"
             }
         },
-        "GitPullWebHookApi": {
+        "GitPullPublicWebHookApi": {
+            "Condition": "MakePublicSolution",
             "Value": {
                 "Fn::Join": [
                     "",
@@ -1487,7 +2106,7 @@
                                         "",
                                         [
                                             {
-                                                "Ref": "WebHookApi"
+                                                "Ref": "PublicWebHookApi"
                                             },
                                             ".execute-api.",
                                             {
@@ -1501,14 +2120,15 @@
                         },
                         "/",
                         {
-                            "Ref": "WebHookApiProdStage"
+                            "Ref": "PublicWebHookApiProdStage"
                         },
                         "/gitpull"
                     ]
                 ]
             }
         },
-        "ZipDownloadWebHookApi": {
+        "ZipDownloadPublicWebHookApi": {
+            "Condition": "MakePublicSolution",
             "Value": {
                 "Fn::Join": [
                     "",
@@ -1525,7 +2145,7 @@
                                         "",
                                         [
                                             {
-                                                "Ref": "WebHookApi"
+                                                "Ref": "PublicWebHookApi"
                                             },
                                             ".execute-api.",
                                             {
@@ -1539,7 +2159,7 @@
                         },
                         "/",
                         {
-                            "Ref": "WebHookApiProdStage"
+                            "Ref": "PublicWebHookApiProdStage"
                         },
                         "/zipdl"
                     ]
