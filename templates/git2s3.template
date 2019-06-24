@@ -40,7 +40,9 @@
                         "PrivateServerIP",
                         "PrivateLambdaVPCID",
                         "PrivateLambdaSubnetID",
-                        "PrivateCreateEndpoint"
+                        "PrivateCreateEndpoint",
+                        "PrivateLambdaRouteTableID",
+                        "PrivateS3VPCEndpointID"
                     ]
                 },                
                 {
@@ -82,10 +84,16 @@
                     "default": "Private Solution VPC ID"
                 },
                 "PrivateLambdaSubnetID": {
-                    "default": "Private Solution Subnet IDs"
+                    "default": "Private Solution Subnet ID"
                 },
                 "PrivateCreateEndpoint": {
-                    "default": "Create VPC Endpoint?"
+                    "default": "Create VPC Endpoints?"
+                },
+                "PrivateS3VPCEndpointID":{
+                    "default": "VPC Endpoint ID for S3 Gateway Endpoint if exists already"
+                },
+                "PrivateLambdaRouteTableID": {
+                    "default": "Route Table ID for S3 Endpoint"
                 },
                 "QSS3BucketName": {
                     "default": "Quick Start S3 Bucket Name"
@@ -153,8 +161,18 @@
             "Type": "AWS::EC2::Subnet::Id",
             "Default": ""
         },
+        "PrivateLambdaRouteTableID": {
+            "Description": "OPTIONAL: Route Table to put S3 Gateway Endpoint Route into (Required when creating solution as a private one AND Create Endpoints = True)",
+            "Type": "String",
+            "Default": ""
+        },
+        "PrivateS3VPCEndpointID": {
+            "Description": "OPTIONAL: VPCEndpoint ID for Lambda Security Group (Required when creating solution as a private one AND Create Endpoints = False)",
+            "Type": "String",
+            "Default": ""
+        },
         "PrivateCreateEndpoint": {  
-            "Description": "OPTIONAL: Create a VPC Privatelink Interface Endpoint for API execution (true / false (if you already have one set to false))",
+            "Description": "OPTIONAL: Create a VPC Endpoints for S3 and API execution? (true / false (if you already have them set to false))",
             "Type": "String",
             "Default": "true",
             "AllowedValues": ["true","false"]
@@ -195,6 +213,34 @@
                 ]}
             ]
         },
+        "S3VPCEndPointManual": {
+            "Fn::And": [          
+                { "Fn::Not": [
+                    {
+                        "Fn::Equals": [
+                            {
+                                "Ref": "PrivateS3VPCEndpointID"
+                            },
+                            ""
+                        ]
+                    }
+                ]},
+                {"Fn::Equals": [
+                    {
+                        "Ref": "PrivateCreateEndpoint"
+                    },
+                    "false"
+                ]}
+            ]
+        },
+        "S3VPCEndPointAuto": {
+            "Fn::Equals": [
+                {
+                    "Ref": "PrivateCreateEndpoint"
+                },
+                "true"
+            ]
+        },        
         "MakePrivateSolution": {
             "Fn::Not": [
                 {
@@ -1037,10 +1083,11 @@
                     "SubnetIds" : [ {"Ref": "PrivateLambdaSubnetID"}]
                 }
             }
-        },   
+        },
         "PrivateLambdaSecurityGroup": {
             "Type": "AWS::EC2::SecurityGroup",
             "Condition": "MakePrivateSolution",
+            "DependsOn": "PrivateS3VPCEndPoint",
             "Properties": {
                 "GroupDescription" : "Private Lambda Security Group",
                 "GroupName" : "sgPrivateGitPullLambda",
@@ -1081,6 +1128,30 @@
                 "FromPort": 443,
                 "ToPort": 443,
                 "SourceSecurityGroupId": { "Ref": "PrivateLambdaSecurityGroup" }
+            }
+        },
+        "PrivateLambdaSecurityGroupEgressRuleA": {
+            "Type": "AWS::EC2::SecurityGroupEgress",
+            "Condition": "S3VPCEndPointManual",
+            "DependsOn": "PrivateS3VPCEndPoint",
+            "Properties": {
+                "GroupId": { "Ref": "PrivateLambdaSecurityGroup" },
+                "IpProtocol": "tcp",
+                "FromPort": 443,
+                "ToPort": 443,
+                "SourceSecurityGroupId": { "Ref": "PrivateS3VPCEndpointID" }
+            }
+        },        
+        "PrivateLambdaSecurityGroupEgressRuleB": {
+            "Type": "AWS::EC2::SecurityGroupEgress",
+            "Condition": "S3VPCEndPointAuto",
+            "DependsOn": "PrivateS3VPCEndPoint",
+            "Properties": {
+                "GroupId": { "Ref": "PrivateLambdaSecurityGroup" },
+                "IpProtocol": "tcp",
+                "FromPort": 443,
+                "ToPort": 443,
+                "SourceSecurityGroupId": { "Ref": "PrivateS3VPCEndPoint" }
             }
         },
         "ZipDlRole": {
@@ -1643,11 +1714,22 @@
         },
         "PrivateAPIVPCPrivateLinkEndPoint": {
             "Type" : "AWS::EC2::VPCEndpoint",
+            "Condition": "MakePrivateSolution",
             "Properties" : {
                 "SecurityGroupIds" : [ {"Ref": "PrivateAPIEndpointSecurityGroup"} ],
                 "ServiceName" : { "Fn::Sub": "com.amazonaws.${AWS::Region}.execute-api" },
                 "SubnetIds" : [ {"Ref": "PrivateLambdaSubnetID"} ],
                 "VpcEndpointType" : "Interface",
+                "VpcId" : {"Ref": "PrivateLambdaVPCID"}
+            }
+        },      
+        "PrivateS3VPCEndPoint": {
+            "Type" : "AWS::EC2::VPCEndpoint",
+            "Condition": "MakePrivateSolution",
+            "Properties" : {
+                "ServiceName" : { "Fn::Sub": "com.amazonaws.${AWS::Region}.s3" },
+                "RouteTableIds" : [ {"Ref": "PrivateLambdaRouteTableID"} ],
+                "VpcEndpointType" : "Gateway",
                 "VpcId" : {"Ref": "PrivateLambdaVPCID"}
             }
         },      
