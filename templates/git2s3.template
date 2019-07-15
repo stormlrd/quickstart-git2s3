@@ -26,7 +26,6 @@
                         "default": "Git Pull Settings"
                     },
                     "Parameters": [
-                        "CreateGitPull",
                         "ApiSecret",
                         "AllowedIps"
                     ]
@@ -43,17 +42,26 @@
                 },
                 {
                     "Label": {
-                        "default": "Private Server Settings"
+                        "default": "Private Server Settings (Optional)"
                     },
                     "Parameters": [
                         "PrivateServerIP",
                         "PrivateLambdaVPCID",
-                        "PrivateLambdaSubnetID",
-                        "PrivateCreateEndpoint",
-                        "PrivateLambdaRouteTableID",
-                        "PrivateS3VPCEndpointID"
+                        "PrivateLambdaSubnetaID",
+                        "PrivateLambdaSubnetbID"
                     ]
-                },                
+                },
+                {
+                    "Label": {
+                        "default": "Endpoint Configuration Settings For Private Server (Optional)"
+                    },
+                    "Parameters": [
+                        "CreateEndpoints",
+                        "PrivateLambdaSubnetRouteTableID",
+                        "S3PrefixListID",
+						"APIGatewayEndpointSGID"
+                    ]
+                },  
                 {
                     "Label": {
                         "default": "AWS Quick Start Configuration"
@@ -68,6 +76,9 @@
                 "AllowedIps": {
                     "default": "Allowed IPs"
                 },
+				"APIGatewayEndpointSGID" : {
+                    "default": "API GW Privatelink Endpoint SG ID"
+				},
                 "ApiSecret": {
                     "default": "API Secret"
                 },
@@ -90,21 +101,24 @@
                     "default": "Output S3 Bucket Name"
                 },
                 "PrivateServerIP": {
-                    "default": "Private Repo Server IP Address"
+                    "default": "Private Git Server IP Address"
                 },
                 "PrivateLambdaVPCID": {
                     "default": "Private Solution VPC ID"
                 },
-                "PrivateLambdaSubnetID": {
-                    "default": "Private Solution Subnet ID"
+                "PrivateLambdaSubnetaID": {
+                    "default": "Private Solution 1st Subnet ID"
                 },
-                "PrivateCreateEndpoint": {
+                "PrivateLambdaSubnetbID": {
+                    "default": "Private Solution 2nd	 Subnet ID"
+                },
+                "CreateEndpoints": {
                     "default": "Create VPC Endpoints?"
                 },
-                "PrivateS3VPCEndpointID":{
+                "S3PrefixListID":{
                     "default": "VPC Endpoint ID for S3 Gateway Endpoint if exists already"
                 },
-                "PrivateLambdaRouteTableID": {
+                "PrivateLambdaSubnetRouteTableID": {
                     "default": "Route Table ID for S3 Endpoint"
                 },
                 "QSS3BucketName": {
@@ -122,31 +136,30 @@
             "Type": "String",
             "Default": "34.198.203.127/32,34.198.178.64/32,34.198.32.85/32,104.192.136.0/21"
         },
+		"APIGatewayEndpointSGID": {
+            "Description": "Required if Create VPC Endpoints is set to FALSE and you are building a private solution.",
+            "Type": "String",
+            "Default": ""
+		},
         "ApiSecret": {
             "Description": "gitpull method only. WebHook Secrets for use with GitHub Enterprise and GitLab. If a secret is matched IP range authentication is bypassed. Cannot contain: , \\ \"",
             "Type": "String",
             "Default": "",
             "NoEcho": "true"
         },
-        "CreateGitPull": {
-            "Description": "Create GitPull Method / API / Lambda resources?",
-            "Type": "String",
-            "Default": "true",
-            "AllowedValues": ["true","false"]
-        },
         "CustomDomainName": {
-            "Description": "Use a custom domain name for the webhook endpoint, if left blank API Gateway will create a domain name for you (Ignored if using Private Server as Private APIs do not support Custom Names)",
+            "Description": "public solution only. Use a custom domain name for the webhook endpoint, if left blank API Gateway will create a domain name for you (Ignored if using Private Server as Private APIs do not support Custom Names)",
             "Type": "String",
             "Default": ""
         },
         "KMSMasterKeyID": {
-            "Description": "Bucket encryption KMS Key ID. Note: default encryption is expecting an AWS KMS-managed key (SSE-KMS)",
+            "Description": "Required. Bucket encryption KMS Key ID. Note: default encryption is expecting an AWS KMS-managed key (SSE-KMS)",
             "Type": "String",
             "Default": ""       
         },
         "GitToken": {
             "NoEcho": "true",
-            "Description": "zipdl method only. Personal access token, needed for GitHub Enterprise and GitLab",
+            "Description": "zipdl public method only. Personal access token, needed for GitHub Enterprise and GitLab",
             "Type": "String",
             "Default": "",
             "ConstraintDescription": "this token must be generated from the git server/provider"
@@ -170,7 +183,7 @@
             "Default": ""
         },
         "PrivateServerIP": {
-            "Description": "OPTIONAL: Existing Private Server IP address (!!Entering an IP will force the solution to become private!! API = private, Lambda = VPC Bound, PrivateLink Created)",
+            "Description": "OPTIONAL: Existing Private Server IP address (IMPORTANT NOTE: !!Entering an IP will force the solution to become private!! API = private, Lambda = VPC Bound, PrivateLinks Required etc)",
             "Type": "String",
             "Default": ""
         },
@@ -179,23 +192,28 @@
             "Type": "AWS::EC2::VPC::Id",
             "Default": ""
         },
-        "PrivateLambdaSubnetID": {  
-            "Description": "OPTIONAL: Subnet to put API Gateway and Lambda Function (Required when creating solution as a private one)",
+        "PrivateLambdaSubnetaID": {  
+            "Description": "OPTIONAL: 1st Subnet to put API Gateway and Lambda Function (Required when creating solution as a private one)",
             "Type": "AWS::EC2::Subnet::Id",
             "Default": ""
         },
-        "PrivateLambdaRouteTableID": {
-            "Description": "Route Table ID for S3 Gateway Endpoint Route Entry (Optional, however Required when creating solution as Private with Create Endpoints = True)",
+        "PrivateLambdaSubnetbID": {  
+            "Description": "OPTIONAL: 2nd Subnet to put API Gateway and Lambda Function (Required when creating solution as a private one)",
+            "Type": "AWS::EC2::Subnet::Id",
+            "Default": ""
+        },
+        "PrivateLambdaSubnetRouteTableID": {
+            "Description": "Required if Create VPC Endpoints is set to TRUE and you are building a Private solution.",
             "Type": "String",
             "Default": ""
         },
-        "PrivateS3VPCEndpointID": {
-            "Description": "OPTIONAL: VPCEndpoint ID for Lambda Security Group (Required when creating solution as a private one AND Create Endpoints = False)",
+        "S3PrefixListID": {
+            "Description": "Required if Create VPC Endpoints is set to TRUE and you are building a Private solution.",
             "Type": "String",
-            "Default": ""
+            "Default": "pl-6ca54005"
         },
-        "PrivateCreateEndpoint": {  
-            "Description": "OPTIONAL: Create a VPC Endpoints for S3 and API execution? (true / false (if you already have them set to false))",
+        "CreateEndpoints": {  
+            "Description": "Private Solution Only: Create VPC Endpoints for S3 and API execution?",
             "Type": "String",
             "Default": "true",
             "AllowedValues": ["true","false"]
@@ -216,15 +234,7 @@
         }
     },
     "Conditions": {
-        "CreateGitPullResources": {
-            "Fn::Equals": [
-                {
-                    "Ref": "CreateGitPull"
-                },
-                "true"
-            ]
-        },    
-        "CreatePrivateVPCEndpoint": {
+        "CreatePrivateVPCEndpoints": {
             "Fn::And": [          
                 { "Fn::Not": [
                     {
@@ -238,19 +248,19 @@
                 ]},
                 {"Fn::Equals": [
                     {
-                        "Ref": "PrivateCreateEndpoint"
+                        "Ref": "CreateEndpoints"
                     },
                     "true"
                 ]}
             ]
         },
-        "S3VPCEndPointManual": {
+        "EndPointsPreExist": {
             "Fn::And": [          
                 { "Fn::Not": [
                     {
                         "Fn::Equals": [
                             {
-                                "Ref": "PrivateS3VPCEndpointID"
+                                "Ref": "S3PrefixListID"
                             },
                             ""
                         ]
@@ -258,20 +268,12 @@
                 ]},
                 {"Fn::Equals": [
                     {
-                        "Ref": "PrivateCreateEndpoint"
+                        "Ref": "CreateEndpoints"
                     },
                     "false"
                 ]}
             ]
-        },
-        "S3VPCEndPointAuto": {
-            "Fn::Equals": [
-                {
-                    "Ref": "PrivateCreateEndpoint"
-                },
-                "true"
-            ]
-        },        
+        },       
         "MakePrivateSolution": {
             "Fn::Not": [
                 {
@@ -551,7 +553,15 @@
         "KeyBucket": {
             "Type": "AWS::S3::Bucket",
             "Properties": {
-                "Tags": []
+               "BucketEncryption": { 
+                "ServerSideEncryptionConfiguration": [{
+                  "ServerSideEncryptionByDefault": {
+                    "SSEAlgorithm": "aws:kms",
+                    "KMSMasterKeyID": {"Ref": "KMSMasterKeyID"}
+                  }
+                }]
+			   },
+			  "Tags": []
             }
         },
         "OutputBucket": {
@@ -571,6 +581,14 @@
                 "VersioningConfiguration": {
                     "Status": "Enabled"
                 },
+               "BucketEncryption": { 
+                "ServerSideEncryptionConfiguration": [{
+                  "ServerSideEncryptionByDefault": {
+                    "SSEAlgorithm": "aws:kms",
+                    "KMSMasterKeyID": {"Ref": "KMSMasterKeyID"}
+                  }
+                }]
+			   },
                 "Tags": []
             }
         },
@@ -1119,14 +1137,13 @@
                 },
                 "VpcConfig" : {
                     "SecurityGroupIds" : [ {"Ref": "PrivateLambdaSecurityGroup"}],
-                    "SubnetIds" : [ {"Ref": "PrivateLambdaSubnetID"}]
+                    "SubnetIds" : [ {"Ref": "PrivateLambdaSubnetaID"}, {"Ref": "PrivateLambdaSubnetbID"}]
                 }
             }
         },
         "PrivateLambdaSecurityGroup": {
             "Type": "AWS::EC2::SecurityGroup",
             "Condition": "MakePrivateSolution",
-            "DependsOn": "PrivateS3VPCEndPoint",
             "Properties": {
                 "GroupDescription" : "Private Lambda Security Group",
                 "GroupName" : "sgPrivateGitPullLambda",
@@ -1151,16 +1168,27 @@
         },
         "PrivateAPIEndpointSecurityGroup": {
             "Type": "AWS::EC2::SecurityGroup",
-            "Condition": "CreatePrivateVPCEndpoint",
+            "Condition": "CreatePrivateVPCEndpoints",
             "Properties": {
                 "GroupDescription" : "Private VPC Endpoint Security Group",
                 "GroupName" : "sgPrivateVPCAPIEndpoint",
                 "VpcId" : {"Ref": "PrivateLambdaVPCID"}
             }
         },
-        "PrivateLambdaSecurityGroupIngressRule": {
+        "PrivateLambdaSecurityGroupIngressRuleA": {
             "Type": "AWS::EC2::SecurityGroupIngress",
-            "Condition": "MakePrivateSolution",
+            "Condition": "EndPointsPreExist",
+            "Properties": {
+                "GroupId": { "Ref": "APIGatewayEndpointSGID" },
+                "IpProtocol": "tcp",
+                "FromPort": 443,
+                "ToPort": 443,
+                "SourceSecurityGroupId": { "Ref": "PrivateLambdaSecurityGroup" }
+            }
+        },
+        "PrivateLambdaSecurityGroupIngressRuleB": {
+            "Type": "AWS::EC2::SecurityGroupIngress",
+            "Condition": "CreatePrivateVPCEndpoints",
             "Properties": {
                 "GroupId": { "Ref": "PrivateAPIEndpointSecurityGroup" },
                 "IpProtocol": "tcp",
@@ -1171,28 +1199,15 @@
         },
         "PrivateLambdaSecurityGroupEgressRuleA": {
             "Type": "AWS::EC2::SecurityGroupEgress",
-            "Condition": "S3VPCEndPointManual",
-            "DependsOn": "PrivateS3VPCEndPoint",
+            "Condition": "MakePrivateSolution",
             "Properties": {
                 "GroupId": { "Ref": "PrivateLambdaSecurityGroup" },
                 "IpProtocol": "tcp",
                 "FromPort": 443,
                 "ToPort": 443,
-                "SourceSecurityGroupId": { "Ref": "PrivateS3VPCEndpointID" }
+                "DestinationPrefixListId": { "Ref": "S3PrefixListID" }
             }
         },        
-        "PrivateLambdaSecurityGroupEgressRuleB": {
-            "Type": "AWS::EC2::SecurityGroupEgress",
-            "Condition": "S3VPCEndPointAuto",
-            "DependsOn": "PrivateS3VPCEndPoint",
-            "Properties": {
-                "GroupId": { "Ref": "PrivateLambdaSecurityGroup" },
-                "IpProtocol": "tcp",
-                "FromPort": 443,
-                "ToPort": 443,
-                "SourceSecurityGroupId": { "Ref": "PrivateS3VPCEndPoint" }
-            }
-        },
         "ZipDlRole": {
             "Type": "AWS::IAM::Role",
             "Properties": {
@@ -1266,6 +1281,7 @@
             }
         },
         "ZipDlLambda": {
+            "Condition": "MakePublicSolution",
             "DependsOn": "CopyZips",
             "Type": "AWS::Lambda::Function",
             "Properties": {
@@ -1287,6 +1303,35 @@
                 "Runtime": "python2.7",
                 "MemorySize": 128,
                 "Timeout": 30
+            }
+        },
+        "PrivateZipDlLambda": { 
+		    "Condition": "MakePrivateSolution",
+            "DependsOn": "CopyZips",
+            "Type": "AWS::Lambda::Function",
+            "Properties": {
+                "Handler": "lambda_function.lambda_handler",
+                "Role": {
+                    "Fn::GetAtt": [
+                        "ZipDlRole",
+                        "Arn"
+                    ]
+                },
+                "Code": {
+                    "S3Bucket": {
+                        "Ref": "LambdaZipsBucket"
+                    },
+                    "S3Key": {
+                        "Fn::Sub": "${QSS3KeyPrefix}functions/packages/ZipDl/lambda.zip"
+                    }
+                },
+                "Runtime": "python2.7",
+                "MemorySize": 128,
+                "Timeout": 30,
+                "VpcConfig" : {
+                    "SecurityGroupIds" : [ {"Ref": "PrivateLambdaSecurityGroup"}],
+                    "SubnetIds" : [ {"Ref": "PrivateLambdaSubnetaID"}, {"Ref": "PrivateLambdaSubnetbID"}]
+                }
             }
         },
         "PublicWebHookRole": {
@@ -1753,21 +1798,21 @@
         },
         "PrivateAPIVPCPrivateLinkEndPoint": {
             "Type" : "AWS::EC2::VPCEndpoint",
-            "Condition": "MakePrivateSolution",
+            "Condition": "CreatePrivateVPCEndpoints",
             "Properties" : {
                 "SecurityGroupIds" : [ {"Ref": "PrivateAPIEndpointSecurityGroup"} ],
                 "ServiceName" : { "Fn::Sub": "com.amazonaws.${AWS::Region}.execute-api" },
-                "SubnetIds" : [ {"Ref": "PrivateLambdaSubnetID"} ],
+                "SubnetIds" : [ {"Ref": "PrivateLambdaSubnetaID"},{"Ref": "PrivateLambdaSubnetbID"}  ],
                 "VpcEndpointType" : "Interface",
                 "VpcId" : {"Ref": "PrivateLambdaVPCID"}
             }
         },      
         "PrivateS3VPCEndPoint": {
             "Type" : "AWS::EC2::VPCEndpoint",
-            "Condition": "MakePrivateSolution",
+            "Condition": "CreatePrivateVPCEndpoints",
             "Properties" : {
                 "ServiceName" : { "Fn::Sub": "com.amazonaws.${AWS::Region}.s3" },
-                "RouteTableIds" : [ {"Ref": "PrivateLambdaRouteTableID"} ],
+                "RouteTableIds" : [ {"Ref": "PrivateLambdaSubnetRouteTableID"} ],
                 "VpcEndpointType" : "Gateway",
                 "VpcId" : {"Ref": "PrivateLambdaVPCID"}
             }
@@ -1962,7 +2007,7 @@
                                                 ":lambda:path//2015-03-31/functions/",
                                                 {
                                                     "Fn::GetAtt": [
-                                                        "ZipDlLambda",
+                                                        "PrivateZipDlLambda",
                                                         "Arn"
                                                     ]
                                                 },
@@ -2280,7 +2325,7 @@
                 ]
             }
         },
-       "PrivGitPullPublicWebHookApi": {
+        "PrivGitPullPublicWebHookApi": {
             "Condition": "MakePrivateSolution",
             "Value": {
                 "Fn::Join": [
@@ -2321,42 +2366,7 @@
         },
         "PrivZipDownloadPublicWebHookApi": {
             "Condition": "MakePrivateSolution",
-            "Value": {
-                "Fn::Join": [
-                    "",
-                    [
-                        " https://",
-                        {
-                            "Fn::If": [
-                                "UseCustomDomain",
-                                {
-                                    "Ref": "CustomDomainName"
-                                },
-                                {
-                                    "Fn::Join": [
-                                        "",
-                                        [
-                                            {
-                                                "Ref": "PrivateWebHookApi"
-                                            },
-                                            ".execute-api.",
-                                            {
-                                                "Ref": "AWS::Region"
-                                            },
-                                            ".amazonaws.com"
-                                        ]
-                                    ]
-                                }
-                            ]
-                        },
-                        "/",
-                        {
-                            "Ref": "PrivateWebHookApiProdStage"
-                        },
-                        "/zipdl"
-                    ]
-                ]
-            }
+            "Value": { "Fn::GetAtt": "DnsEntries" }
         },        
         "OutputBucketName": {
             "Value": {
