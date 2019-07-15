@@ -6,18 +6,27 @@
             "ParameterGroups": [
                 {
                     "Label": {
-                        "default": "General Settings"
+                        "default": "Output Bucket Settings"
                     },
                     "Parameters": [
                         "OutputBucketName",
-                        "CustomDomainName"
+                        "KMSMasterKeyID"
                     ]
                 },
+                {
+                    "Label": {
+                        "default": "API Settings"
+                    },
+                    "Parameters": [
+                        "CustomDomainName"
+                    ]
+                },                
                 {
                     "Label": {
                         "default": "Git Pull Settings"
                     },
                     "Parameters": [
+                        "CreateGitPull",
                         "ApiSecret",
                         "AllowedIps"
                     ]
@@ -68,6 +77,9 @@
                 "GitToken": {
                     "default": "Git Personal Access Token"
                 },
+                "KMSMasterKeyID": {
+                    "default": "KMS Master Key ID"
+                },
                 "OauthKey": {
                     "default": "OAuth2 Key"
                 },
@@ -116,10 +128,21 @@
             "Default": "",
             "NoEcho": "true"
         },
+        "CreateGitPull": {
+            "Description": "Create GitPull Method / API / Lambda resources?",
+            "Type": "String",
+            "Default": "true",
+            "AllowedValues": ["true","false"]
+        },
         "CustomDomainName": {
             "Description": "Use a custom domain name for the webhook endpoint, if left blank API Gateway will create a domain name for you (Ignored if using Private Server as Private APIs do not support Custom Names)",
             "Type": "String",
             "Default": ""
+        },
+        "KMSMasterKeyID": {
+            "Description": "Bucket encryption KMS Key ID. Note: default encryption is expecting an AWS KMS-managed key (SSE-KMS)",
+            "Type": "String",
+            "Default": ""       
         },
         "GitToken": {
             "NoEcho": "true",
@@ -162,7 +185,7 @@
             "Default": ""
         },
         "PrivateLambdaRouteTableID": {
-            "Description": "OPTIONAL: Route Table to put S3 Gateway Endpoint Route into (Required when creating solution as a private one AND Create Endpoints = True)",
+            "Description": "Route Table ID for S3 Gateway Endpoint Route Entry (Optional, however Required when creating solution as Private with Create Endpoints = True)",
             "Type": "String",
             "Default": ""
         },
@@ -193,6 +216,14 @@
         }
     },
     "Conditions": {
+        "CreateGitPullResources": {
+            "Fn::Equals": [
+                {
+                    "Ref": "CreateGitPull"
+                },
+                "true"
+            ]
+        },    
         "CreatePrivateVPCEndpoint": {
             "Fn::And": [          
                 { "Fn::Not": [
@@ -350,7 +381,15 @@
         "LambdaZipsBucket": {
             "Type": "AWS::S3::Bucket",
             "Properties": {
-                "Tags": []
+              "BucketEncryption": { 
+                "ServerSideEncryptionConfiguration": [{
+                  "ServerSideEncryptionByDefault": {
+                    "SSEAlgorithm": "aws:kms",
+                    "KMSMasterKeyID": {"Ref": "KMSMasterKeyID"}
+                  }
+                }]
+              },
+              "Tags": []
             }
         },
         "CopyZips": {
